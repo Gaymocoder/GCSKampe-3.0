@@ -1,13 +1,11 @@
-import discord
-from discord.ext import commands
+from .music import *
 import datetime
 import json
 import yt_dlp
 
-class Kampe(discord.ext.commands.Bot):
+class Kampe(MusicKampe):
     def __init__(self, *args, **kargs):
         super().__init__(*args, **kargs)
-        self.initCommands()
     
     async def on_ready(self):
         self.Link = f'https://discord.com/api/oauth2/authorize?client_id={self.user.id}&permissions=8&scope=bot'
@@ -17,10 +15,5 @@ class Kampe(discord.ext.commands.Bot):
     async def on_message(self, message):
         if message.content.lower() == 'ping':
             await message.channel.send('Pong!')
+        await super().on_message(message)
         await self.process_commands(message)
-
-    def initCommands(self):
-
-        @self.command()
-        async def here(ctx):
-            await ctx.send("Yup, I'm here! Hello!")
