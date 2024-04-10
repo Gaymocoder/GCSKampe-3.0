@@ -35,9 +35,23 @@ Bot: Pong!
 
 ### Commands
 The command prefix is "k!" by default
-#### here()
-Reacts on "k!here"
+#### play <source>
+Bot joins to voice chat, where command executor is, and starts playing audio from requested source
+Supported source types:
+1. YouTube (https://www.youtube.com/)
+2. Direct mp3 file link
 ```
-User: k!here
-Bot: Yup, I'm here! Hello!
+User: k!play https://youtu.be/4xDzrJKXOOY
+Bot: Started playing *verylonglinkthroughgooglevideocomtosourceaudio*
 ```
+#### load
+Bot starts waiting for your audio files right in the text channel as attachments. By the end execute command stopload
+```
+User: k!load
+Bot: Send files, i\'ll add them to my queue
+User: *sends music files*
+User: k!stopload
+Bot: *User mention*, loading stream has been closed
+```
+#### stopload
+Check the [load](####load) command

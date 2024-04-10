@@ -61,6 +61,7 @@ class MusicKampe(discord.ext.commands.Bot):
     async def launchQueue(self, ctx):
         while (self.queuePosition < len(self.queue)):
             currentTrack = await self.getTrackUrl(self.queue[self.queuePosition])
+            await ctx.send(f'Started playing {currentTrack}')
             self.voiceState.play(FFmpegPCMAudio(currentTrack, executable= "ffmpeg.exe"))
             while (self.voiceState.is_playing() or self.voiceState.is_paused()):
                 await asyncio.sleep(0.5)
@@ -96,12 +97,14 @@ class MusicKampe(discord.ext.commands.Bot):
                 return
             if self.voiceState == None:
                 self.voiceState = await ctx.author.voice.channel.connect()
-            if musicSource.startswith('https://www.youtube.com/'):
+            if musicSource.startswith('https://www.youtube.com/') or musicSource.startswith('https://youtu.be/'):
                 self.queue.append(getYouTubeAudioUrl(musicSource))
             elif musicSource.endswith('.mp3'):
                 self.queue.append(musicSource)
             else:
                 await ctx.send('Wrong url: either direct mp3 or youtube')
+                return
+            await ctx.send(f'Added to queue: {musicSource}')
             await self.playTracks(ctx)
             
 
