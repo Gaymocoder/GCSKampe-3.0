@@ -38,7 +38,6 @@ class Track:
             }]
         }
         data = YoutubeDL(ydlOptions).extract_info(self.__srcAddress, download = False)
-        print(json.dumps(data, indent = 4,  ensure_ascii = False))
         return data['url']
 
 
@@ -63,16 +62,13 @@ class Track:
 
         
     async def audio(self):
-        options = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-                    'options': '-vn'}
-        return FFmpegOpusAudio(await self.link(), executable= "ffmpeg.exe", **options)
+        return FFmpegOpusAudio(await self.link(), executable= "ffmpeg.exe")
 
 
 class MusicKampe(discord.ext.commands.Bot):
     def __obliviate(self):
         self.queue = []
         self.loading = {}
-        self.playing = False
         self.voiceState = None
         self.rootMessage = None
         self.queuePosition = 0
@@ -82,6 +78,7 @@ class MusicKampe(discord.ext.commands.Bot):
         super().__init__(*args, **kargs)
         self.initCommands()
         self.__obliviate()
+        self.kicked = True
 
 
     @property
@@ -96,6 +93,13 @@ class MusicKampe(discord.ext.commands.Bot):
         if self.rootMessage == None:
             return None
         return self.rootMessage.author
+
+    def is_connected(self):
+        return (self.voiceState != None and self.voiceState.channel != None and self.voiceState.is_connected())
+
+
+    def is_playing(self):
+        return (self.voiceState != None and (self.voiceState.is_playing() or self.voiceState.is_paused()))
 
 
     async def musicConnect(self, voice):
@@ -114,27 +118,28 @@ class MusicKampe(discord.ext.commands.Bot):
         await self.musicConnect(voice)
         self.queue.append(track)
         await self.channelLog.send(f'Added to queue: {await self.queue[-1].source()}')
-        asyncio.create_task(self.playTracks())
+        await self.playTracks()
 
 
     async def launchQueue(self):
+        print(self.queuePosition, self.queue)
         while (self.queuePosition < len(self.queue)):
-            self.playing = True
             currentTrack = self.queue[self.queuePosition]
             await self.channelLog.send(f'Started playing {await currentTrack.source()}')
-            self.voiceState.play(await currentTrack.audio())
-            while (self.voiceState != None and (self.voiceState.is_playing() or self.voiceState.is_paused())):
+            audio = await currentTrack.audio()
+            self.voiceState.play(audio)
+            while (self.is_playing()):
                 await asyncio.sleep(0.5)
-            self.queuePosition += 1
-            self.playing = False
+            if (self.is_connected()):
+                self.queuePosition += 1
 
 
     async def playTracks(self):
-        if (self.voiceState == None):
+        if (not self.is_connected()):
             self.voiceState = await self.sessionAuthor.voice.channel.connect()
-        if not self.playing:
+        if not (self.is_playing()):
             await self.launchQueue()
-            if (self.voiceState != None):
+            if (self.is_connected()):
                 await self.channelLog.send("I've reached the end of the queue")
 
 
@@ -162,12 +167,12 @@ class MusicKampe(discord.ext.commands.Bot):
     async def on_voice_state_update(self, member, before, after):
         if member.id == self.user.id:
             if before.channel != None and after.channel == None:
-                await self.channelLog.send("I've been kicked from voice channel")
-                self.voiceState.source.cleanup()
-                await self.voiceState.disconnect()
-                self.voiceState.cleanup()
-                self.__obliviate()
-                raise asyncio.exceptions.CancelledError
+                if self.kicked == True:
+                    await self.channelLog.send("I've been kicked from voice channel")
+                    self.__obliviate()
+                else:
+                    self.__obliviate()
+                    self.kicked = True
 
 
     def initCommands(self):
@@ -185,7 +190,6 @@ class MusicKampe(discord.ext.commands.Bot):
             else:
                 await ctx.send('Wrong url: either direct mp3 or youtube')
                 return
-            await self.playTracks()
             
 
         @self.command()
@@ -213,5 +217,7 @@ class MusicKampe(discord.ext.commands.Bot):
             if self.voiceState == None:
                 await ctx.send("You're not in voice channel")
             else:
+                self.kicked = False
                 await self.voiceState.disconnect()
+                self.voiceState.clearup()
                 self.__obliviate()
