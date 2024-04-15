@@ -7,6 +7,10 @@ import enum
 import json
 
 
+def isConnected(member):
+    return (member.voice != None and member.voice.channel != None)
+
+
 class SourceType(enum.Enum):
     URL = 0
     YOUTUBE = 1
@@ -65,21 +69,29 @@ class Track:
         return FFmpegOpusAudio(await self.link(), executable= "ffmpeg.exe")
 
 
-class MusicKampe(discord.ext.commands.Bot):
+class MusicSession:
     def __obliviate(self):
         self.queue = []
-        self.loading = {}
-        self.voiceState = None
+        self.loading = []
         self.rootMessage = None
         self.queuePosition = 0
-        
 
-    def __init__(self, *args, **kargs):
-        super().__init__(*args, **kargs)
-        self.initCommands()
+
+    async def disconnect(self):
+        if self.is_connected():
+            if self.voiceState.source != None:
+                self.voiceState.source.cleanup()
+            await self.voiceState.disconnect()
+            self.voiceState.cleanup()
         self.__obliviate()
-        self.kicked = True
 
+
+    def __init__(self, voiceClient, rootMessage):
+        self.__obliviate()
+        self.voiceState = voiceClient
+        self.rootMessage = rootMessage
+        self.kicked = True
+    
 
     @property
     def channelLog(self):
@@ -87,12 +99,13 @@ class MusicKampe(discord.ext.commands.Bot):
             return None
         return self.rootMessage.channel
 
-    
+
     @property
-    def sessionAuthor(self):
+    def author(self):
         if self.rootMessage == None:
             return None
         return self.rootMessage.author
+
 
     def is_connected(self):
         return (self.voiceState != None and self.voiceState.channel != None and self.voiceState.is_connected())
@@ -102,20 +115,7 @@ class MusicKampe(discord.ext.commands.Bot):
         return (self.voiceState != None and (self.voiceState.is_playing() or self.voiceState.is_paused()))
 
 
-    async def musicConnect(self, voice):
-        if self.voiceState != None:
-            return True
-        if voice != None:
-            self.voiceState = await voice.channel.connect()
-            return True
-        else:
-            await self.channelLog.send('You\'re not in voice channel')
-            self.rootMessage = None
-            return False
-
-
-    async def addTrack(self, track, voice = None):
-        await self.musicConnect(voice)
+    async def addTrack(self, track):
         self.queue.append(track)
         await self.channelLog.send(f'Added to queue: {await self.queue[-1].source()}')
         await self.playTracks()
@@ -125,13 +125,16 @@ class MusicKampe(discord.ext.commands.Bot):
         print(self.queuePosition, self.queue)
         while (self.queuePosition < len(self.queue)):
             currentTrack = self.queue[self.queuePosition]
-            await self.channelLog.send(f'Started playing {await currentTrack.source()}')
             audio = await currentTrack.audio()
             self.voiceState.play(audio)
+            await self.channelLog.send(f'Started playing {await currentTrack.source()}')
+            
             while (self.is_playing()):
                 await asyncio.sleep(0.5)
             if (self.is_connected()):
                 self.queuePosition += 1
+            else:
+                break
 
 
     async def playTracks(self):
@@ -143,6 +146,14 @@ class MusicKampe(discord.ext.commands.Bot):
                 await self.channelLog.send("I've reached the end of the queue")
 
 
+class MusicKampe(discord.ext.commands.Bot):
+
+    def __init__(self, *args, **kargs):
+        super().__init__(*args, **kargs)
+        self.sessions = {}
+        self.initMusicCommands()
+
+
     async def addTracksFromAtts(self, message):
         for att in message.attachments:
             if att.url.find('.mp3') == -1:
@@ -151,13 +162,54 @@ class MusicKampe(discord.ext.commands.Bot):
                 'channel': message.channel.id,
                 'message': message.id,
                 'attachment': att.id}
-            await self.addTrack(Track(audioSource, self, srcType = SourceType.DISCORDATT), voice = message.author.voice)
+            track = Track(audioSource, self, srcType = SourceType.DISCORDATT)
+            await self.sessions[message.guild.id].addTrack(track)
 
+
+    async def voiceConnect(self, voiceChannel, rootMessage):
+        voiceState = await voiceChannel.connect()
+        if voiceState != None:
+            self.sessions[voiceChannel.guild.id] = MusicSession(voiceState, rootMessage)
+            return self.sessions[voiceChannel.guild.id]
+
+        print(f'Connection to voice channel "{voiceChannel.name}" (id: {voiceChannel.id}) failed')
+        return False
+
+
+    async def voiceDisconnect(self, guildId):
+        if guildId in self.sessions:
+            print(guildId)
+            await self.sessions[guildId].disconnect()
+            print(self.sessions)
+            self.sessions.pop(guildId)
+            print(self.sessions)
+            return True
+        else:
+            print(f'Disconnection failed: no connection in guild "{(await self.fetch_guild(guildId)).name}" with id {guildId} is detected')
+            return False
+
+    
+    async def startSession(self, ctx):
+        connected = False
+        print(self.sessions)
+        if ctx.guild.id not in self.sessions:
+            if (isConnected(ctx.author)):
+                connected = await self.voiceConnect(ctx.author.voice.channel, ctx.message)
+            else:
+                await ctx.send('You\'re not connected to voice channel')
+
+        if (not connected):
+            print('Cannot start new music session')
+            return False
+
+        return self.sessions[ctx.guild.id]
+
+        
 
     async def on_message(self, message):
-        if (message.author.id not in self.loading):
+        if (message.guild.id not in self.sessions):
             return
-        if (self.loading[message.author.id] != message.guild.id):
+        if (message.author.id not in self.sessions[message.guild.id].loading):
             return
         if (message.attachments == []):
             return
@@ -167,26 +219,27 @@ class MusicKampe(discord.ext.commands.Bot):
     async def on_voice_state_update(self, member, before, after):
         if member.id == self.user.id:
             if before.channel != None and after.channel == None:
-                if self.kicked == True:
+                if self.sessions[member.guild.id].kicked == True:
                     await self.channelLog.send("I've been kicked from voice channel")
-                    self.__obliviate()
+                    self.voiceDisconnect(member.guild.id)
                 else:
-                    self.__obliviate()
-                    self.kicked = True
+                    self.sessions[member.guild.id].kicked = True
 
 
-    def initCommands(self):
+    def initMusicCommands(self):
 
         @self.command()
         async def play(ctx, musicSource : str):
-            print("PLAY COMMAND EXECUTED")
-            self.rootMessage = ctx.message
-            if not (await self.musicConnect(ctx.author.voice)):
+            currentSession = await self.startSession(ctx)
+            if (not currentSession):
                 return
+
             if musicSource.startswith('https://www.youtube.com/') or musicSource.startswith('https://youtu.be/'):
-                await self.addTrack(Track(musicSource, self, srcType = SourceType.YOUTUBE), voice = ctx.author.voice)
+                track = Track(musicSource, self, srcType = SourceType.YOUTUBE)
+                await self.sessions[ctx.guild.id].addTrack(track)
             elif musicSource.endswith('.mp3'):
-                await self.addTrack(Track(musicSource, self, srcType = SourceType.URL), voice = ctx.author.voice)
+                track = Track(musicSource, self, srcType = SourceType.URL)
+                await currentSession.addTrack(track)
             else:
                 await ctx.send('Wrong url: either direct mp3 or youtube')
                 return
@@ -194,30 +247,36 @@ class MusicKampe(discord.ext.commands.Bot):
 
         @self.command()
         async def load(ctx):
-            if (ctx.author.id in self.loading and self.loading[ctx.author.id] == ctx.guild.id):
+            currentSession = await self.startSession(ctx)
+            if (not currentSession):
+                return
+
+            if (ctx.author.id in self.sessions[ctx.guild.id].loading):
                 await ctx.send(f'{ctx.author.mention}, you have already opened loading in this server')
                 return
-            self.rootMessage = ctx.message
-            self.loading[ctx.author.id] = ctx.guild.id
+
+            self.sessions[ctx.guild.id].loading.append(ctx.guild.id)
             await ctx.send('Send files, i\'ll add them to my queue')
 
 
         @self.command()
         async def stopload(ctx):
-            self.rootMessage = ctx.message
-            if (ctx.author.id not in self.loading or self.loading[ctx.author.id] != ctx.guild.id):
+            currentSession = await self.startSession(ctx)
+            if (not currentSession):
+                return
+
+            if (ctx.author.id not in self.sessions[ctx.guild.id].loading):
                 await ctx.send(f'{ctx.author.mention}, you have not opened loading yet')
                 return
+
             self.loading.pop(ctx.author.id)
             await ctx.send(f'{ctx.author.mention}, loading stream has been closed')
 
 
         @self.command()
         async def stop(ctx):
-            if self.voiceState == None:
+            if ctx.guild.id not in self.sessions:
                 await ctx.send("You're not in voice channel")
             else:
-                self.kicked = False
-                await self.voiceState.disconnect()
-                self.voiceState.clearup()
-                self.__obliviate()
+                self.sessions[ctx.guild.id].kicked = False
+                await self.voiceDisconnect(ctx.guild.id)
