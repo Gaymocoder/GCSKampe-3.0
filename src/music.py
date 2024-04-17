@@ -77,20 +77,12 @@ class MusicSession:
         self.queuePosition = 0
 
 
-    async def disconnect(self):
-        if self.is_connected():
-            if self.voiceState.source != None:
-                self.voiceState.source.cleanup()
-            await self.voiceState.disconnect()
-            self.voiceState.cleanup()
-        self.__obliviate()
-
-
     def __init__(self, voiceClient, rootMessage):
         self.__obliviate()
         self.voiceState = voiceClient
         self.rootMessage = rootMessage
         self.kicked = True
+        self.moving = False
     
 
     @property
@@ -115,6 +107,26 @@ class MusicSession:
         return (self.voiceState != None and (self.voiceState.is_playing() or self.voiceState.is_paused()))
 
 
+    async def disconnect(self):
+        if self.is_connected():
+            if self.voiceState.source != None:
+                self.voiceState.source.cleanup()
+            await self.voiceState.disconnect()
+            self.voiceState.cleanup()
+        self.__obliviate()
+
+
+    async def waitToConnect(self):
+        self.voiceState.pause()
+        while (not self.is_connected()):
+            await asyncio.sleep(0.5)
+        self.voiceState.resume()
+
+
+    async def updateConnectionData(self):
+        self.voiceState = self.voiceState.guild.voice_client
+
+
     async def addTrack(self, track):
         self.queue.append(track)
         await self.channelLog.send(f'Added to queue: {await self.queue[-1].source()}')
@@ -129,8 +141,13 @@ class MusicSession:
             self.voiceState.play(audio)
             await self.channelLog.send(f'Started playing {await currentTrack.source()}')
             
-            while (self.is_playing()):
+            while (self.is_playing() or self.moving):
+                if (self.moving):
+                    await self.waitToConnect()
+                    self.moving = False
+                    continue
                 await asyncio.sleep(0.5)
+
             if (self.is_connected()):
                 self.queuePosition += 1
             else:
@@ -178,11 +195,8 @@ class MusicKampe(discord.ext.commands.Bot):
 
     async def voiceDisconnect(self, guildId):
         if guildId in self.sessions:
-            print(guildId)
             await self.sessions[guildId].disconnect()
-            print(self.sessions)
             self.sessions.pop(guildId)
-            print(self.sessions)
             return True
         else:
             print(f'Disconnection failed: no connection in guild "{(await self.fetch_guild(guildId)).name}" with id {guildId} is detected')
@@ -218,12 +232,16 @@ class MusicKampe(discord.ext.commands.Bot):
 
     async def on_voice_state_update(self, member, before, after):
         if member.id == self.user.id:
-            if before.channel != None and after.channel == None:
-                if self.sessions[member.guild.id].kicked == True:
-                    await self.channelLog.send("I've been kicked from voice channel")
-                    self.voiceDisconnect(member.guild.id)
+            if before.channel != after.channel and before.channel != None:
+                if after.channel == None:
+                    if self.sessions[member.guild.id].kicked == True:
+                        await self.sessions[member.guild.id].channelLog.send("I've been kicked from voice channel")
+                        await self.voiceDisconnect(member.guild.id)
+                    else:
+                        self.sessions[member.guild.id].kicked = True
                 else:
-                    self.sessions[member.guild.id].kicked = True
+                    self.sessions[member.guild.id].moving = True
+                    
 
 
     def initMusicCommands(self):
