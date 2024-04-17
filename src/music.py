@@ -7,6 +7,12 @@ import enum
 import json
 
 
+FFMPEG_OPTIONS = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn'
+}
+
+
 def isConnected(member):
     return (member.voice != None and member.voice.channel != None)
 
@@ -66,7 +72,7 @@ class Track:
 
         
     async def audio(self):
-        return FFmpegOpusAudio(await self.link(), executable= "ffmpeg.exe")
+        return FFmpegOpusAudio(await self.link(), **FFMPEG_OPTIONS, executable = "ffmpeg.exe")
 
 
 class MusicSession:
@@ -75,6 +81,7 @@ class MusicSession:
         self.loading = []
         self.rootMessage = None
         self.queuePosition = 0
+        self.playing = False
 
 
     def __init__(self, voiceClient, rootMessage):
@@ -130,35 +137,41 @@ class MusicSession:
     async def addTrack(self, track):
         self.queue.append(track)
         await self.channelLog.send(f'Added to queue: {await self.queue[-1].source()}')
-        await self.playTracks()
+        asyncio.create_task(self.playTracks())
+
+
+    async def play(self):
+        currentTrack = self.queue[self.queuePosition]
+        audio = await currentTrack.audio()
+        self.voiceState.play(audio)
+        await self.channelLog.send(f'Started playing {await currentTrack.source()}')
+
+
+    async def waitTrackEnd(self):
+        while (self.is_playing() or self.moving):
+            if (self.moving):
+                await self.waitToConnect()
+                self.moving = False
+                continue
+            await asyncio.sleep(0.5)
 
 
     async def launchQueue(self):
-        print(self.queuePosition, self.queue)
         while (self.queuePosition < len(self.queue)):
-            currentTrack = self.queue[self.queuePosition]
-            audio = await currentTrack.audio()
-            self.voiceState.play(audio)
-            await self.channelLog.send(f'Started playing {await currentTrack.source()}')
-            
-            while (self.is_playing() or self.moving):
-                if (self.moving):
-                    await self.waitToConnect()
-                    self.moving = False
-                    continue
-                await asyncio.sleep(0.5)
-
-            if (self.is_connected()):
-                self.queuePosition += 1
-            else:
+            await self.play()
+            await self.waitTrackEnd()
+            if (not self.is_connected()):
                 break
+            self.queuePosition += 1
 
 
     async def playTracks(self):
         if (not self.is_connected()):
-            self.voiceState = await self.sessionAuthor.voice.channel.connect()
-        if not (self.is_playing()):
+            self.voiceState = await self.author.voice.channel.connect()
+        if (not self.playing):
+            self.playing = True
             await self.launchQueue()
+            self.playing = False
             if (self.is_connected()):
                 await self.channelLog.send("I've reached the end of the queue")
 
@@ -205,18 +218,18 @@ class MusicKampe(discord.ext.commands.Bot):
     
     async def startSession(self, ctx):
         connected = False
-        print(self.sessions)
-        if ctx.guild.id not in self.sessions:
-            if (isConnected(ctx.author)):
-                connected = await self.voiceConnect(ctx.author.voice.channel, ctx.message)
-            else:
-                await ctx.send('You\'re not connected to voice channel')
+        if ctx.guild.id in self.sessions:
+            return self.sessions[ctx.guild.id]
+
+        if (isConnected(ctx.author)):
+            connected = await self.voiceConnect(ctx.author.voice.channel, ctx.message)
+        else:
+            await ctx.send('You\'re not connected to voice channel')
 
         if (not connected):
             print('Cannot start new music session')
-            return False
 
-        return self.sessions[ctx.guild.id]
+        return connected
 
         
 
@@ -273,7 +286,7 @@ class MusicKampe(discord.ext.commands.Bot):
                 await ctx.send(f'{ctx.author.mention}, you have already opened loading in this server')
                 return
 
-            self.sessions[ctx.guild.id].loading.append(ctx.guild.id)
+            self.sessions[ctx.guild.id].loading.append(ctx.author.id)
             await ctx.send('Send files, i\'ll add them to my queue')
 
 
