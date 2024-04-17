@@ -8,6 +8,12 @@ Audio Control application with presets
             yt_dlp
             PyNaCl
 3. ffmpeg
+#### About discord.py
+For the current moment (April 2024) discord.py doesn't provide proper handle of disconnection, raising exceptions which break the event loop. So it should be installed with custom crutch:
+```
+pip install -U git+https://github.com/EvieePy/discord.py.git@fix/temp-voice --force-reinstall
+```
+This lib's bug has been reported in official discord.py discord-server by me, so the official actual fix should be ready soon — this kind of discord.py installation is a temporary need
 
 ### Prepare to launch
 1. Download the repository
