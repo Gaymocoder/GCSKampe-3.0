@@ -4,6 +4,7 @@ import json
 import time
 import asyncio
 import logging
+import os, posixpath
 
 import discord
 from discord import FFmpegOpusAudio
@@ -11,6 +12,7 @@ from discord.ext import commands
 from yt_dlp import YoutubeDL
 
 from urllib import request
+from urllib.parse import urlsplit, unquote
 from functools import reduce
 from io import BytesIO
 from mutagen.mp3 import MP3
@@ -35,6 +37,14 @@ def getURLBytes(url, size):
     req.add_header('User-Agent', 'Mozilla/5.0 (X11; U; Linux i686) Gecko/20071127 Firefox/2.0.0.11')
     response = request.urlopen(req)
     return response.read()
+
+
+def getURLFileName(url):
+    urlpath = urlsplit(url).path
+    basename = posixpath.basename(unquote(urlpath))
+    if (os.path.basename(basename) != basename or unquote(posixpath.basename(urlpath)) != basename):
+        raise ValueError
+    return basename
 
 
 class SourceType(enum.Enum):
@@ -89,10 +99,14 @@ class AudioData:
 
 
     async def __processURLData(self, data):
-        self._data['title'] = data['title'][0]
-        self._data['author'] = data['artist'][0]
-        self._data['thumbnail'] = None
         self._data['url'] = await self.source()
+        self._data['title'] = getURLFileName(self._data['url'])
+        self._data['author'] = None
+        if 'title' in data:
+            self._data['title'] = data['title'][0]
+        if 'author' in data:
+            self._data['author'] = data['artist'][0]
+        self._data['thumbnail'] = None
         self._data['mp3'] = self._data['url']
 
 
@@ -105,7 +119,7 @@ class AudioData:
                 await self.__processURLData(await self.__getURLData())
             case SourceType.YOUTUBE:
                 self.__processYoutubeData(self.__getYoutubeData())
-        asyncio.create_task(self.message.edit(content = f'Adding new track to the queue: {self._data["title"]}'))
+        await self.message.edit(content = f'Adding new track to the queue: {self._data["title"]}')
         return self
 
 
@@ -381,9 +395,26 @@ class MusicKampe(discord.ext.commands.Bot):
 
 
         @self.command()
+        async def queue(ctx):
+            if ctx.guild.id not in self.sessions:
+                await ctx.send(f'There\'s no opened session on this server')
+                return
+
+            messages = ['']
+            for i, track in enumerate(self.sessions[ctx.guild.id].queue):
+                new_line = f'{i + 1}. [{track.title}]({track.link})\n'
+                if len(messages[-1] + new_line) > 2000:
+                    messages.append('')
+                messages[-1] += new_line
+            for message in messages:
+                print(message)
+                await ctx.send(message)
+
+
+        @self.command()
         async def stopload(ctx):
-            currentSession = await self.startSession(ctx)
-            if (not currentSession):
+            if ctx.guild.id not in self.sessions:
+                await ctx.send(f'There\'s no opened session on this server')
                 return
 
             if (ctx.author.id not in self.sessions[ctx.guild.id].loading):
@@ -397,8 +428,9 @@ class MusicKampe(discord.ext.commands.Bot):
         @self.command()
         async def stop(ctx):
             if ctx.guild.id not in self.sessions:
-                await ctx.send("You're not in voice channel")
-            else:
-                self.sessions[ctx.guild.id].kicked = False
-                await self.voiceDisconnect(ctx.guild.id)
-                await ctx.send("The music session for this guild has been closed")
+                await ctx.send(f'There\'s no opened session on this server')
+                return
+
+            self.sessions[ctx.guild.id].kicked = False
+            await self.voiceDisconnect(ctx.guild.id)
+            await ctx.send("The music session for this guild has been closed")

@@ -41,16 +41,22 @@ Bot: Pong!
 
 ### Commands
 The command prefix is "k!" by default
-#### play <source>
+#### k!link
+Bot sends a message with invite-link to himself
+```
+User: k!link
+Bot: *link to invite the bot to your server*
+```
+#### k!play <source>
 Bot joins to voice chat, where command executor is, and starts playing audio from requested source
 Supported source types:
 1. YouTube (https://www.youtube.com/)
 2. Direct mp3 file link
 ```
 User: k!play https://youtu.be/4xDzrJKXOOY
-Bot: Started playing *video_title*
+Bot: Started playing "synthwave radio 🌌 - beats to chill/game to"
 ```
-#### load
+#### k!load
 Bot starts waiting for your audio files right in the text channel as attachments. By the end execute command stopload
 ```
 User: k!load
@@ -59,11 +65,22 @@ User: *sends music files*
 User: k!stopload
 Bot: *User mention*, loading stream has been closed
 ```
-#### stopload
+#### k!queue
+Bot sends messages with full queue for current music session
+```
+User: k!queue
+Bot: 1. synthwave radio 🌌 - beats to chill/game to
+     2. lofi hip hop radio 📚 - beats to relax/study to
+     3. dark ambient radio 🌃 - music to escape/dream to
+     4. peaceful piano radio 🎹 - music to focus/study to
+     ...
+```
+#### k!stopload
 Check the [load](####load) command
-#### stop
-Stops current session
+#### k!stop
+Closes current session
 ```
 User: k!stop
 Bot: *disconnects from voice channel and removes current session from his cache*
 Bot: The music session for this guild has been closed
+```
