@@ -401,3 +401,4 @@ class MusicKampe(discord.ext.commands.Bot):
             else:
                 self.sessions[ctx.guild.id].kicked = False
                 await self.voiceDisconnect(ctx.guild.id)
+                await ctx.send("The music session for this guild has been closed")

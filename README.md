@@ -1,5 +1,6 @@
 # GCS Discord Kampe
-Audio Control application with presets
+Discord-bot with some functions like:
+1. Music
 
 ## Installation
 ### Dependencies
@@ -9,11 +10,10 @@ Audio Control application with presets
             PyNaCl
 3. ffmpeg
 #### About discord.py
-For the current moment (April 2024) discord.py doesn't provide proper handle of disconnection, raising exceptions which break the event loop. So it should be installed with custom crutch:
+For the current moment (April 2024) latest discord.py release (2.3.2) doesn't provide proper handle of disconnection, raising exceptions which break the event loop, so it has to be installed right from github with pip-command:
 ```
-pip install -U git+https://github.com/EvieePy/discord.py.git@fix/temp-voice --force-reinstall
+pip install -U git+https://github.com/Rapptz/discord.py.git --force-reinstall
 ```
-This lib's bug has been reported in official discord.py discord-server by me, so the official actual fix should be ready soon — this kind of discord.py installation is a temporary need
 
 ### Prepare to launch
 1. Download the repository
@@ -48,7 +48,7 @@ Supported source types:
 2. Direct mp3 file link
 ```
 User: k!play https://youtu.be/4xDzrJKXOOY
-Bot: Started playing *verylonglinkthroughgooglevideocomtosourceaudio*
+Bot: Started playing *video_title*
 ```
 #### load
 Bot starts waiting for your audio files right in the text channel as attachments. By the end execute command stopload
@@ -61,3 +61,9 @@ Bot: *User mention*, loading stream has been closed
 ```
 #### stopload
 Check the [load](####load) command
+#### stop
+Stops current session
+```
+User: k!stop
+Bot: *disconnects from voice channel and removes current session from his cache*
+Bot: The music session for this guild has been closed
