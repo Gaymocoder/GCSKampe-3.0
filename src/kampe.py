@@ -10,7 +10,9 @@ class Kampe(MusicKampe):
     async def on_ready(self):
         self.Link = f'https://discord.com/api/oauth2/authorize?client_id={self.user.id}&permissions=8&scope=bot'
         print(f'{datetime.datetime.utcnow().strftime("[%d.%m.%Y %T UTC]")} Logged in as {self.user} (ID: {self.user.id})')
+        print(f'Link to invite: {self.Link}')
         print('~~~~~~~~~~~~~~~~~~~~~~~~~')
+
 
     async def on_message(self, message):
         if message.content.lower() == 'ping':

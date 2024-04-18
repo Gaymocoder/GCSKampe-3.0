@@ -1,10 +1,21 @@
+import sys
+import enum
+import json
+import time
+import asyncio
+import logging
+
 import discord
 from discord import FFmpegOpusAudio
 from discord.ext import commands
 from yt_dlp import YoutubeDL
-import asyncio
-import enum
-import json
+
+from urllib import request
+from functools import reduce
+from io import BytesIO
+from mutagen.mp3 import MP3
+from mutagen.easyid3 import EasyID3
+from logging import debug as DEBUG, info as INFO
 
 
 FFMPEG_OPTIONS = {
@@ -17,17 +28,85 @@ def isConnected(member):
     return (member.voice != None and member.voice.channel != None)
 
 
+def getURLBytes(url, size):
+    req = request.Request(url)
+    req.add_header('Range', f'bytes={0}-{size-1}')
+    req.add_header('Content-Type', 'application/json')
+    req.add_header('User-Agent', 'Mozilla/5.0 (X11; U; Linux i686) Gecko/20071127 Firefox/2.0.0.11')
+    response = request.urlopen(req)
+    return response.read()
+
+
 class SourceType(enum.Enum):
     URL = 0
     YOUTUBE = 1
     DISCORDATT = 2
 
 
-class Track:
-    def __init__(self, srcAddress, bot, srcType = SourceType.URL):
+class AudioData:
+    def __init__(self, srcAddress, bot, message, srcType = SourceType.URL):
         self.srcType = srcType
+        self.message = message
         self.__srcAddress = srcAddress
         self.__bot = bot
+        self._data = {}
+
+
+    def __await__(self):
+        return self.__getData().__await__()
+
+
+    def __getYoutubeData(self):
+        ydlOptions = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'm4a',
+            }]
+        }
+        return YoutubeDL(ydlOptions).extract_info(self.__srcAddress, download = False)
+
+    
+    def __processYoutubeData(self, data):
+        self._data['title'] = data['fulltitle']
+        self._data['author'] = data['uploader']
+        self._data['thumbnail'] = data['thumbnail']
+        self._data['url'] = data['original_url']
+        self._data['mp3'] = data['url']
+
+
+    async def __getURLData(self):
+        data = getURLBytes(await self.source(), 10)
+        if data[0:3] != b'ID3':
+            raise Exception('ID3 not in front of mp3 file')
+        size = reduce(lambda a,b: a*128 + b, bytearray(data[-4:]), 0)
+
+        header = BytesIO()
+        data = getURLBytes(await self.source(), size + 2881)
+        header.write(data)
+        header.seek(0)
+        return MP3(header, ID3 = EasyID3).tags
+
+
+    async def __processURLData(self, data):
+        self._data['title'] = data['title'][0]
+        self._data['author'] = data['artist'][0]
+        self._data['thumbnail'] = None
+        self._data['url'] = await self.source()
+        self._data['mp3'] = self._data['url']
+
+
+    async def __getData(self):
+        asyncio.create_task(self.message.edit(content = 'Adding new track to the queue: getting metadata...'))
+        match self.srcType:
+            case SourceType.URL:
+                await self.__processURLData(await self.__getURLData())
+            case SourceType.DISCORDATT:
+                await self.__processURLData(await self.__getURLData())
+            case SourceType.YOUTUBE:
+                self.__processYoutubeData(self.__getYoutubeData())
+        asyncio.create_task(self.message.edit(content = f'Adding new track to the queue: {self._data["title"]}'))
+        return self
 
 
     async def __getDiscordAttURL(self):
@@ -39,19 +118,10 @@ class Track:
         return None
 
 
-    def __getYoutubeAudioURL(self):
-        ydlOptions = {
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'm4a',
-            }]
-        }
-        data = YoutubeDL(ydlOptions).extract_info(self.__srcAddress, download = False)
-        return data['url']
+    async def source(self):
+        if 'url' in self._data:
+            return self._data['url']
 
-
-    async def link(self):
         match self.srcType:
             case SourceType.URL:
                 return self.__srcAddress
@@ -60,19 +130,34 @@ class Track:
             case SourceType.DISCORDATT:
                 return await self.__getDiscordAttURL()
 
-    
-    async def source(self):
-        if self.srcType == SourceType.DISCORDATT:
-            return await self.link()
-        return self.__srcAddress
+
+class Track(AudioData):
+    def __init__(self, srcAddress, bot, message, srcType = SourceType.URL):
+        super().__init__(srcAddress, bot, message, srcType = srcType)
 
 
-    def data(self):
-        pass
+    @property
+    def title(self):
+        return self._data['title']
 
-        
-    async def audio(self):
-        return FFmpegOpusAudio(await self.link(), **FFMPEG_OPTIONS, executable = "ffmpeg.exe")
+
+    @property
+    def author(self):
+        return self._data['author']
+
+
+    @property
+    def link(self):
+        return self._data['url']
+
+
+    @property
+    def audioURL(self):
+        return self._data['mp3']
+
+
+    def audio(self):
+        return FFmpegOpusAudio(self.audioURL, **FFMPEG_OPTIONS, executable = "ffmpeg.exe")
 
 
 class MusicSession:
@@ -136,15 +221,14 @@ class MusicSession:
 
     async def addTrack(self, track):
         self.queue.append(track)
-        await self.channelLog.send(f'Added to queue: {await self.queue[-1].source()}')
         asyncio.create_task(self.playTracks())
 
 
     async def play(self):
         currentTrack = self.queue[self.queuePosition]
-        audio = await currentTrack.audio()
+        audio = currentTrack.audio()
         self.voiceState.play(audio)
-        await self.channelLog.send(f'Started playing {await currentTrack.source()}')
+        await self.channelLog.send(f'Started playing `"{currentTrack.title}"`')
 
 
     async def waitTrackEnd(self):
@@ -188,12 +272,17 @@ class MusicKampe(discord.ext.commands.Bot):
         for att in message.attachments:
             if att.url.find('.mp3') == -1:
                 continue
-            audioSource = {'guild': message.guild.id,
+            audioSource = {
+                'guild': message.guild.id,
                 'channel': message.channel.id,
                 'message': message.id,
-                'attachment': att.id}
-            track = Track(audioSource, self, srcType = SourceType.DISCORDATT)
+                'attachment': att.id
+            }
+            
+            trackMessage = await self.sessions[message.guild.id].channelLog.send(f'Adding new track to the queue...')
+            track = await Track(audioSource, self, trackMessage, srcType = SourceType.DISCORDATT)
             await self.sessions[message.guild.id].addTrack(track)
+            asyncio.create_task(trackMessage.edit(content = f'Added new track to the queue: "`{track.title}`"'))
 
 
     async def voiceConnect(self, voiceChannel, rootMessage):
@@ -265,11 +354,12 @@ class MusicKampe(discord.ext.commands.Bot):
             if (not currentSession):
                 return
 
+            trackMessage = self.channelLog.send(f'Adding new track to the queue...')
             if musicSource.startswith('https://www.youtube.com/') or musicSource.startswith('https://youtu.be/'):
-                track = Track(musicSource, self, srcType = SourceType.YOUTUBE)
+                track = await Track(musicSource, self, await trackMessage, srcType = SourceType.YOUTUBE)
                 await self.sessions[ctx.guild.id].addTrack(track)
             elif musicSource.endswith('.mp3'):
-                track = Track(musicSource, self, srcType = SourceType.URL)
+                track = await Track(musicSource, self, await trackMessage, srcType = SourceType.URL)
                 await currentSession.addTrack(track)
             else:
                 await ctx.send('Wrong url: either direct mp3 or youtube')
