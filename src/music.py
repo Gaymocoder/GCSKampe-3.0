@@ -7,6 +7,7 @@ import logging
 import os, posixpath
 
 import discord
+import pyshorteners
 from discord import FFmpegOpusAudio
 from discord.ext import commands
 from yt_dlp import YoutubeDL
@@ -28,6 +29,10 @@ FFMPEG_OPTIONS = {
 
 def isConnected(member):
     return (member.voice != None and member.voice.channel != None)
+
+
+def shortURL(url):
+    return pyshorteners.Shortener().dagd.short(url)
 
 
 def getURLBytes(url, size):
@@ -81,8 +86,11 @@ class AudioData:
         self._data['title'] = data['fulltitle']
         self._data['author'] = data['uploader']
         self._data['thumbnail'] = data['thumbnail']
+        self._data['length'] = 'live'
         self._data['url'] = data['original_url']
         self._data['mp3'] = data['url']
+        if not data['is_live']:
+            self._data['length'] = data['duration_string']
 
 
     async def __getURLData(self):
@@ -95,23 +103,27 @@ class AudioData:
         data = getURLBytes(await self.source(), size + 2881)
         header.write(data)
         header.seek(0)
-        return MP3(header, ID3 = EasyID3).tags
+        return MP3(header, ID3 = EasyID3)
 
 
-    async def __processURLData(self, data):
+    async def __processURLData(self, mp3):
+        data = mp3.tags
         self._data['url'] = await self.source()
         self._data['title'] = getURLFileName(self._data['url'])
         self._data['author'] = None
+        self._data['length'] = f'{int(int(mp3.info.length) / 60):02}:{(int(mp3.info.length) % 60):02}'
+        self._data['thumbnail'] = None
+        self._data['mp3'] = self._data['url']
+
         if 'title' in data:
             self._data['title'] = data['title'][0]
         if 'author' in data:
             self._data['author'] = data['artist'][0]
-        self._data['thumbnail'] = None
-        self._data['mp3'] = self._data['url']
 
 
     async def __getData(self):
-        asyncio.create_task(self.message.edit(content = 'Adding new track to the queue: getting metadata...'))
+        if self.__class__.__name__ == 'Track':
+            await self.message.edit(embed = self.gettingMetadataEmbed())
         match self.srcType:
             case SourceType.URL:
                 await self.__processURLData(await self.__getURLData())
@@ -119,7 +131,8 @@ class AudioData:
                 await self.__processURLData(await self.__getURLData())
             case SourceType.YOUTUBE:
                 self.__processYoutubeData(self.__getYoutubeData())
-        await self.message.edit(content = f'Adding new track to the queue: {self._data["title"]}')
+        if self.__class__.__name__ == 'Track':
+            await self.message.edit(embed = self.addingFinalEmbed())
         return self
 
 
@@ -161,6 +174,11 @@ class Track(AudioData):
 
 
     @property
+    def length(self):
+        return self._data['length']
+
+
+    @property
     def link(self):
         return self._data['url']
 
@@ -168,6 +186,25 @@ class Track(AudioData):
     @property
     def audioURL(self):
         return self._data['mp3']
+
+
+    def startedEmbed(self):
+        description = f'Started playing: [**{self.title}**]({self.link})'
+        embed = discord.Embed(color = discord.Colour, description = description)
+        return embed
+
+
+    @classmethod
+    def addingFirstEmbed(self):
+        return discord.Embed(description = 'Adding track to the queue...', color = discord.Colour.from_str('#000001'))
+
+
+    def gettingMetadataEmbed(self):
+        return discord.Embed(description = 'Adding track to the queue: getting metadata...', color = discord.Colour.from_str('#000001'))
+
+    
+    def addingFinalEmbed(self):
+        return discord.Embed(description = f'Adding track to the queue: `{self.title}`...', color = discord.Colour.from_str('#000001'))
 
 
     def audio(self):
@@ -179,7 +216,7 @@ class MusicSession:
         self.queue = []
         self.loading = []
         self.rootMessage = None
-        self.queuePosition = 0
+        self._queuePosition = 0
         self.playing = False
 
 
@@ -203,6 +240,12 @@ class MusicSession:
         if self.rootMessage == None:
             return None
         return self.rootMessage.author
+
+    @property
+    def queuePosition(self):
+        if self.queue == []:
+            return 0
+        return (self._queuePosition + 1)
 
 
     def is_connected(self):
@@ -239,7 +282,7 @@ class MusicSession:
 
 
     async def play(self):
-        currentTrack = self.queue[self.queuePosition]
+        currentTrack = self.queue[self._queuePosition]
         audio = currentTrack.audio()
         self.voiceState.play(audio)
         await self.channelLog.send(f'Started playing `"{currentTrack.title}"`')
@@ -255,12 +298,12 @@ class MusicSession:
 
 
     async def launchQueue(self):
-        while (self.queuePosition < len(self.queue)):
+        while (self._queuePosition < len(self.queue)):
             await self.play()
             await self.waitTrackEnd()
             if (not self.is_connected()):
                 break
-            self.queuePosition += 1
+            self._queuePosition += 1
 
 
     async def playTracks(self):
@@ -282,6 +325,21 @@ class MusicKampe(discord.ext.commands.Bot):
         self.initMusicCommands()
 
 
+    def addedEmbed(self, track, guildID, author):
+        embed = discord.Embed(title = 'Added track', color = discord.Colour.from_str('#00FF00'))
+        embed.add_field(name = 'Track', value = f'**[{track.title}]({track.link})**', inline = False)
+        embed.add_field(name = 'Track length', value = track.length)
+        embed.add_field(name = 'Download', value = f'{shortURL(track.audioURL)}')
+        embed.add_field(name = '', value = '', inline = False)
+        upcomingPosition = len(self.sessions[guildID].queue) - self.sessions[guildID].queuePosition
+        upcomingPosition = 'current' if upcomingPosition == 0 else upcomingPosition
+        embed.add_field(name = 'Position in upcoming', value = 'next' if upcomingPosition == 1 else str(upcomingPosition))
+        embed.add_field(name = 'Position in queue', value = len(self.sessions[guildID].queue))
+        embed.add_field(name = '', value = '', inline = False)
+        embed.set_footer(text = f'requested by {author.display_name}', icon_url = author.display_avatar.url)
+        return embed
+
+
     async def addTracksFromAtts(self, message):
         for att in message.attachments:
             if att.url.find('.mp3') == -1:
@@ -293,10 +351,10 @@ class MusicKampe(discord.ext.commands.Bot):
                 'attachment': att.id
             }
             
-            trackMessage = await self.sessions[message.guild.id].channelLog.send(f'Adding new track to the queue...')
+            trackMessage = await self.sessions[message.guild.id].channelLog.send(embed = Track.addingFirstEmbed())
             track = await Track(audioSource, self, trackMessage, srcType = SourceType.DISCORDATT)
             await self.sessions[message.guild.id].addTrack(track)
-            asyncio.create_task(trackMessage.edit(content = f'Added new track to the queue: "`{track.title}`"'))
+            asyncio.create_task(trackMessage.edit(embed = self.addedEmbed(track, message.guild.id, message.author)))
 
 
     async def voiceConnect(self, voiceChannel, rootMessage):
@@ -368,13 +426,16 @@ class MusicKampe(discord.ext.commands.Bot):
             if (not currentSession):
                 return
 
-            trackMessage = self.channelLog.send(f'Adding new track to the queue...')
             if musicSource.startswith('https://www.youtube.com/') or musicSource.startswith('https://youtu.be/'):
-                track = await Track(musicSource, self, await trackMessage, srcType = SourceType.YOUTUBE)
+                trackMessage = await self.sessions[ctx.guild.id].channelLog.send(embed = Track.addingFirstEmbed())
+                track = await Track(musicSource, self, trackMessage, srcType = SourceType.YOUTUBE)
                 await self.sessions[ctx.guild.id].addTrack(track)
+                await trackMessage.edit(embed = self.addedEmbed(track, ctx.guild.id, ctx.author))
             elif musicSource.endswith('.mp3'):
-                track = await Track(musicSource, self, await trackMessage, srcType = SourceType.URL)
-                await currentSession.addTrack(track)
+                trackMessage = await self.sessions[ctx.guild.id].channelLog.send(embed = Track.addingFirstEmbed())
+                track = await Track(musicSource, self, trackMessage, srcType = SourceType.URL)
+                await self.sessions[ctx.guild.id].addTrack(track)
+                await trackMessage.edit(embed = self.addedEmbed(track, ctx.guild.id, ctx.author))
             else:
                 await ctx.send('Wrong url: either direct mp3 or youtube')
                 return
