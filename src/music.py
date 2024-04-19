@@ -107,6 +107,7 @@ class AudioData:
         self._data['mp3'] = data['url']
         if not data['is_live']:
             self._data['length'] = data['duration_string']
+        self._data['shortmp3'] = shortURL(self._data['mp3'])
 
 
     async def __getURLData(self):
@@ -130,6 +131,7 @@ class AudioData:
         self._data['length'] = f'{int(int(mp3.info.length) / 60):02}:{(int(mp3.info.length) % 60):02}'
         self._data['thumbnail'] = None
         self._data['mp3'] = self._data['url']
+        self._data['shortmp3'] = shortURL(self._data['mp3'])
 
         if 'title' in data:
             self._data['title'] = data['title'][0]
@@ -203,6 +205,11 @@ class Track(AudioData):
     def audioURL(self):
         return self._data['mp3']
 
+    
+    @property
+    def shortAudioURL(self):
+        return self._data['shortmp3']
+
 
     def startedEmbed(self):
         description = f'Started playing: [**{self.title}**]({self.link})'
@@ -212,15 +219,15 @@ class Track(AudioData):
 
     @classmethod
     def addingFirstEmbed(self):
-        return discord.Embed(description = 'Adding track to the queue...', color = discord.Colour.from_str('#000001'))
+        return discord.Embed(description = '**Adding track to the queue...**', color = discord.Colour.from_str('#000001'))
 
 
     def gettingMetadataEmbed(self):
-        return discord.Embed(description = 'Adding track to the queue: getting metadata...', color = discord.Colour.from_str('#000001'))
+        return discord.Embed(description = '**Adding track to the queue: getting metadata...**', color = discord.Colour.from_str('#000001'))
 
     
     def addingFinalEmbed(self):
-        return discord.Embed(description = f'Adding track to the queue: `{self.title}`...', color = discord.Colour.from_str('#000001'))
+        return discord.Embed(description = f'**Adding track to the queue: `{self.title}`...**', color = discord.Colour.from_str('#000001'))
 
 
     def audio(self):
@@ -242,6 +249,7 @@ class MusicSession:
         self.rootMessage = rootMessage
         self.kicked = True
         self.moving = False
+        self.nexting = False
     
 
     @property
@@ -262,6 +270,20 @@ class MusicSession:
         if self.queue == []:
             return 0
         return (self._queuePosition + 1)
+
+
+    def queueEmbed(self, position = None):
+        description = ''
+        if position == None:
+            position = self._queuePosition
+        for i in range(position, position + 10):
+            if i >= len(self.queue):
+                break
+            track = self.queue[i]
+            description += f'[:arrow_down:]({track.shortAudioURL}) {(i+1):02}. [**{track.title[:65] + ("...**" if len(track.title) > 65 else "**")}]({track.link})\n'
+        embed = discord.Embed(description = description, color = discord.Colour.from_str('#000001'))
+        embed.set_footer(text = f'{position+1}-{min(position + 10, len(self.queue))} from {len(self.queue)}')
+        return embed
 
 
     def is_connected(self):
@@ -301,7 +323,7 @@ class MusicSession:
         currentTrack = self.queue[self._queuePosition]
         audio = currentTrack.audio()
         self.voiceState.play(audio)
-        await sendMessage(self.channelLog, f'Started playing [{currentTrack.title}]({currentTrack.link})')
+        await self.channelLog.send(embed = currentTrack.startedEmbed())
 
 
     async def waitTrackEnd(self):
@@ -310,6 +332,9 @@ class MusicSession:
                 await self.waitToConnect()
                 self.moving = False
                 continue
+            if (self.nexting):
+                self.nexting = False
+                break
             await asyncio.sleep(0.5)
 
 
@@ -317,6 +342,7 @@ class MusicSession:
         while (self._queuePosition < len(self.queue)):
             await self.play()
             await self.waitTrackEnd()
+            self.voiceState.stop()
             if (not self.is_connected()):
                 break
             self._queuePosition += 1
@@ -347,7 +373,7 @@ class MusicKampe(discord.ext.commands.Bot):
         embed = discord.Embed(title = 'Added track', color = discord.Colour.from_str('#00FF00'))
         embed.add_field(name = 'Track', value = f'**[{track.title}]({track.link})**', inline = False)
         embed.add_field(name = 'Track length', value = track.length)
-        embed.add_field(name = 'Download', value = f'{shortURL(track.audioURL)}')
+        embed.add_field(name = 'Download', value = f'{track.shortAudioURL}')
         embed.add_field(name = '', value = '', inline = False)
         embed.add_field(name = 'Position in upcoming', value = 'next' if upcomingPosition == 1 else str(upcomingPosition))
         embed.add_field(name = 'Position in queue', value = len(self.sessions[guildID].queue))
@@ -372,7 +398,6 @@ class MusicKampe(discord.ext.commands.Bot):
             track = await Track(audioSource, self, trackMessage, srcType = SourceType.DISCORDATT)
             await self.sessions[message.guild.id].addTrack(track)
             asyncio.create_task(trackMessage.edit(embed = self.addedEmbed(track, message.guild.id, message.author)))
-
 
 
     async def voiceConnect(self, voiceChannel, rootMessage):
@@ -473,19 +498,19 @@ class MusicKampe(discord.ext.commands.Bot):
 
 
         @self.command()
+        async def next(ctx):
+            if ctx.guild.id not in self.sessions:
+                return await sendError(ctx, f'There\'s no opened session on this server')
+            self.sessions[ctx.guild.id].nexting = True
+
+
+        @self.command()
         async def queue(ctx):
             if ctx.guild.id not in self.sessions:
                 return await sendError(ctx, f'There\'s no opened session on this server')
 
-            messages = ['']
-            for i, track in enumerate(self.sessions[ctx.guild.id].queue):
-                new_line = f'{i + 1}. [{track.title}]({track.link})\n'
-                if len(messages[-1] + new_line) > 2000:
-                    messages.append('')
-                messages[-1] += new_line
-            for message in messages:
-                print(message)
-                await ctx.send(message)
+            embed = self.sessions[ctx.guild.id].queueEmbed()
+            await ctx.send(embed = embed)
 
 
         @self.command()

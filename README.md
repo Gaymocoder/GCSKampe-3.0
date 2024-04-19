@@ -47,7 +47,7 @@ Bot sends a message with invite-link to himself
 User: k!link
 Bot: *link to invite the bot to your server*
 ```
-#### k!play \<source>
+#### k!play <source>
 Bot joins to voice chat, where command executor is, and starts playing audio from requested source
 Supported source types:
 1. YouTube (https://www.youtube.com/)
