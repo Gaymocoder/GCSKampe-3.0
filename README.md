@@ -5,10 +5,10 @@ Discord-bot with some functions like:
 ## Installation
 ### Dependencies
 1. Python 3.10.11
-2. Modules: discord.py
-            pyshorteners
-            mutagen
-            yt_dlp
+2. Modules: discord.py,
+            pyshorteners,
+            mutagen,
+            yt_dlp,
             PyNaCl
 3. ffmpeg
 #### About discord.py
@@ -91,7 +91,7 @@ Bot: ⬇1. synthwave radio 🌌 - beats to chill/game to
 ```
 
 #### k!stopload
-Check the [load](####load) command
+Check the [load](####k!load) command
 
 #### k!stop
 Closes current session

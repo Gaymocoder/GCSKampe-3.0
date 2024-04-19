@@ -30,7 +30,6 @@ class MusicKampe(discord.ext.commands.Bot):
         embed.add_field(name = 'Position in queue', value = len(self.sessions[guildID].queue))
         embed.add_field(name = '', value = '', inline = False)
         embed.set_footer(text = f'requested by {author.display_name}', icon_url = author.display_avatar.url)
-        print(embed.fields[2].value)
         return embed
 
 
@@ -46,9 +45,14 @@ class MusicKampe(discord.ext.commands.Bot):
             }
             
             trackMessage = await self.sessions[message.guild.id].channelLog.send(embed = Track.addingFirstEmbed())
+            self.sessions[message.guild.id].addingTracks.append(trackMessage.id)
+            while self.sessions[message.guild.id].addingTracks[0] != trackMessage.id:
+                await asyncio.sleep(0.5)
+            await asyncio.sleep(2)
             track = await Track(audioSource, self, trackMessage, srcType = SourceType.DISCORDATT)
             await self.sessions[message.guild.id].addTrack(track)
             asyncio.create_task(trackMessage.edit(embed = self.addedEmbed(track, message.guild.id, message.author)))
+            self.sessions[message.guild.id].addingTracks.pop(0)
 
 
     async def voiceConnect(self, voiceChannel, rootMessage):
@@ -122,14 +126,22 @@ class MusicKampe(discord.ext.commands.Bot):
 
             if musicSource.startswith('https://www.youtube.com/') or musicSource.startswith('https://youtu.be/'):
                 trackMessage = await self.sessions[ctx.guild.id].channelLog.send(embed = Track.addingFirstEmbed())
+                self.sessions[ctx.guild.id].addingTracks.append(trackMessage.id)
+                while self.sessions[ctx.guild.id].addingTracks[0] != trackMessage.id:
+                    await asyncio.sleep(0.5)
                 track = await Track(musicSource, self, trackMessage, srcType = SourceType.YOUTUBE)
                 await self.sessions[ctx.guild.id].addTrack(track)
                 await trackMessage.edit(embed = self.addedEmbed(track, ctx.guild.id, ctx.author))
+                self.sessions[ctx.guild.id].addingTracks.pop(0)
             elif musicSource.endswith('.mp3'):
                 trackMessage = await self.sessions[ctx.guild.id].channelLog.send(embed = Track.addingFirstEmbed())
+                self.sessions[ctx.guild.id].addingTracks.append(trackMessage.id)
+                while self.sessions[ctx.guild.id].addingTracks[0] != trackMessage.id:
+                    await asyncio.sleep(0.5)
                 track = await Track(musicSource, self, trackMessage, srcType = SourceType.URL)
                 await self.sessions[ctx.guild.id].addTrack(track)
                 await trackMessage.edit(embed = self.addedEmbed(track, ctx.guild.id, ctx.author))
+                self.sessions[ctx.guild.id].addingTracks.pop(0)
             else:
                 await sendError(ctx, 'Wrong url: either direct mp3 or youtube')
                 return

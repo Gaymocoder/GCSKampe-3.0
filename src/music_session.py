@@ -7,6 +7,7 @@ class MusicSession:
     def __obliviate(self):
         self.queue = []
         self.loading = []
+        self.addingTracks = []
         self.rootMessage = None
         self._queuePosition = 0
         self.playing = False
