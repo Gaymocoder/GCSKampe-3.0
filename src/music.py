@@ -32,7 +32,7 @@ def isConnected(member):
 
 
 def shortURL(url):
-    return pyshorteners.Shortener().dagd.short(url)
+    return pyshorteners.Shortener().tinyurl.short(url)
 
 
 def getURLBytes(url, size):
@@ -50,6 +50,22 @@ def getURLFileName(url):
     if (os.path.basename(basename) != basename or unquote(posixpath.basename(urlpath)) != basename):
         raise ValueError
     return basename
+
+
+async def sendSuccess(ctx, success):
+    return await ctx.send(embed = discord.Embed(color = discord.Colour.from_str("#00FF00"), description = success))
+        
+
+async def sendWarning(ctx, warning):
+    return await ctx.send(embed = discord.Embed(color = discord.Colour.from_str("#FFFF00"), description = warning))
+
+
+async def sendError(ctx, error):
+    return await ctx.send(embed = discord.Embed(color = discord.Colour.from_str("#FF0000"), description = error))
+
+
+async def sendMessage(ctx, message):
+    return await ctx.send(embed = discord.Embed(color = discord.Colour.from_str("#000001"), description = message))
 
 
 class SourceType(enum.Enum):
@@ -285,7 +301,7 @@ class MusicSession:
         currentTrack = self.queue[self._queuePosition]
         audio = currentTrack.audio()
         self.voiceState.play(audio)
-        await self.channelLog.send(f'Started playing `"{currentTrack.title}"`')
+        await sendMessage(self.channelLog, f'Started playing [{currentTrack.title}]({currentTrack.link})')
 
 
     async def waitTrackEnd(self):
@@ -314,7 +330,7 @@ class MusicSession:
             await self.launchQueue()
             self.playing = False
             if (self.is_connected()):
-                await self.channelLog.send("I've reached the end of the queue")
+                await sendMessage(self.channelLog, "I've reached the end of the queue")
 
 
 class MusicKampe(discord.ext.commands.Bot):
@@ -326,17 +342,18 @@ class MusicKampe(discord.ext.commands.Bot):
 
 
     def addedEmbed(self, track, guildID, author):
+        upcomingPosition = len(self.sessions[guildID].queue) - self.sessions[guildID].queuePosition
+        upcomingPosition = 'current' if upcomingPosition == 0 else upcomingPosition
         embed = discord.Embed(title = 'Added track', color = discord.Colour.from_str('#00FF00'))
         embed.add_field(name = 'Track', value = f'**[{track.title}]({track.link})**', inline = False)
         embed.add_field(name = 'Track length', value = track.length)
         embed.add_field(name = 'Download', value = f'{shortURL(track.audioURL)}')
         embed.add_field(name = '', value = '', inline = False)
-        upcomingPosition = len(self.sessions[guildID].queue) - self.sessions[guildID].queuePosition
-        upcomingPosition = 'current' if upcomingPosition == 0 else upcomingPosition
         embed.add_field(name = 'Position in upcoming', value = 'next' if upcomingPosition == 1 else str(upcomingPosition))
         embed.add_field(name = 'Position in queue', value = len(self.sessions[guildID].queue))
         embed.add_field(name = '', value = '', inline = False)
         embed.set_footer(text = f'requested by {author.display_name}', icon_url = author.display_avatar.url)
+        print(embed.fields[2].value)
         return embed
 
 
@@ -355,6 +372,7 @@ class MusicKampe(discord.ext.commands.Bot):
             track = await Track(audioSource, self, trackMessage, srcType = SourceType.DISCORDATT)
             await self.sessions[message.guild.id].addTrack(track)
             asyncio.create_task(trackMessage.edit(embed = self.addedEmbed(track, message.guild.id, message.author)))
+
 
 
     async def voiceConnect(self, voiceChannel, rootMessage):
@@ -385,7 +403,7 @@ class MusicKampe(discord.ext.commands.Bot):
         if (isConnected(ctx.author)):
             connected = await self.voiceConnect(ctx.author.voice.channel, ctx.message)
         else:
-            await ctx.send('You\'re not connected to voice channel')
+            await sendWarning(ctx, 'You\'re not connected to voice channel')
 
         if (not connected):
             print('Cannot start new music session')
@@ -409,7 +427,7 @@ class MusicKampe(discord.ext.commands.Bot):
             if before.channel != after.channel and before.channel != None:
                 if after.channel == None:
                     if self.sessions[member.guild.id].kicked == True:
-                        await self.sessions[member.guild.id].channelLog.send("I've been kicked from voice channel")
+                        await sendError(self.sessions[member.guild.id].channelLog, "I've been kicked from voice channel")
                         await self.voiceDisconnect(member.guild.id)
                     else:
                         self.sessions[member.guild.id].kicked = True
@@ -437,7 +455,7 @@ class MusicKampe(discord.ext.commands.Bot):
                 await self.sessions[ctx.guild.id].addTrack(track)
                 await trackMessage.edit(embed = self.addedEmbed(track, ctx.guild.id, ctx.author))
             else:
-                await ctx.send('Wrong url: either direct mp3 or youtube')
+                await sendError(ctx, 'Wrong url: either direct mp3 or youtube')
                 return
             
 
@@ -448,18 +466,16 @@ class MusicKampe(discord.ext.commands.Bot):
                 return
 
             if (ctx.author.id in self.sessions[ctx.guild.id].loading):
-                await ctx.send(f'{ctx.author.mention}, you have already opened loading in this server')
-                return
+                return await sendWarning(ctx, f'{ctx.author.mention}, you have already opened loading in this server')
 
             self.sessions[ctx.guild.id].loading.append(ctx.author.id)
-            await ctx.send('Send files, i\'ll add them to my queue')
+            await sendMessage(ctx, 'Send files, i\'ll add them to my queue')
 
 
         @self.command()
         async def queue(ctx):
             if ctx.guild.id not in self.sessions:
-                await ctx.send(f'There\'s no opened session on this server')
-                return
+                return await sendError(ctx, f'There\'s no opened session on this server')
 
             messages = ['']
             for i, track in enumerate(self.sessions[ctx.guild.id].queue):
@@ -475,23 +491,20 @@ class MusicKampe(discord.ext.commands.Bot):
         @self.command()
         async def stopload(ctx):
             if ctx.guild.id not in self.sessions:
-                await ctx.send(f'There\'s no opened session on this server')
-                return
+                return await sendWarning(ctx, f'There\'s no opened session on this server')
 
             if (ctx.author.id not in self.sessions[ctx.guild.id].loading):
-                await ctx.send(f'{ctx.author.mention}, you have not opened loading yet')
-                return
+                return await sendWarning(ctx, f'{ctx.author.mention}, you have not opened loading yet')
 
-            self.loading.pop(ctx.author.id)
-            await ctx.send(f'{ctx.author.mention}, loading stream has been closed')
+            self.sessions[ctx.guild.id].loading.remove(ctx.author.id)
+            await sendSuccess(ctx, f'{ctx.author.mention}, loading stream has been closed')
 
 
         @self.command()
         async def stop(ctx):
             if ctx.guild.id not in self.sessions:
-                await ctx.send(f'There\'s no opened session on this server')
-                return
+                return await sendWarning(ctx, f'There\'s no opened session on this server')
 
             self.sessions[ctx.guild.id].kicked = False
             await self.voiceDisconnect(ctx.guild.id)
-            await ctx.send("The music session for this guild has been closed")
+            await sendSuccess(ctx, "The music session for this guild has been closed")
