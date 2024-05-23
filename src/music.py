@@ -9,7 +9,6 @@ from .extras import sendWarning, sendMessage
 
 from discord.ext import commands
 
-
 class MusicKampe(discord.ext.commands.Bot):
 
     def __init__(self, *args, **kargs):
@@ -33,26 +32,48 @@ class MusicKampe(discord.ext.commands.Bot):
         return embed
 
 
+    async def addTrack(self, audioSource, guildID, author, trackMessage = None, srcType = SourceType.URL):
+        if (trackMessage == None):
+            while (self.sessions[guildID].adding):
+                await asyncio.sleep(0.5)
+            self.sessions[guildID].adding = True
+            trackMessage = await self.sessions[guildID].channelLog.send(embed = Track.addingFirstEmbed())
+            self.sessions[guildID].addingTracks.append(trackMessage.id)
+            self.sessions[guildID].adding = False
+
+        while self.sessions[guildID].addingTracks[0] != trackMessage.id:
+            await asyncio.sleep(0.5)
+        await asyncio.sleep(2)
+        track = await Track(audioSource, self, trackMessage, srcType = srcType)
+        await self.sessions[guildID].addTrack(track)
+        asyncio.create_task(trackMessage.edit(embed = self.addedEmbed(track, guildID, author)))
+        self.sessions[guildID].addingTracks.pop(0)
+
+
     async def addTracksFromAtts(self, message):
+        trackMessages = {}
+        while self.sessions[message.guild.id].adding:
+            await asyncio.sleep(0.5)
+        self.sessions[message.guild.id].adding = True
         for att in message.attachments:
-            if att.url.find('.mp3') == -1:
+            if att.content_type != 'audio/mpeg':
                 continue
-            audioSource = {
-                'guild': message.guild.id,
-                'channel': message.channel.id,
-                'message': message.id,
-                'attachment': att.id
-            }
-            
             trackMessage = await self.sessions[message.guild.id].channelLog.send(embed = Track.addingFirstEmbed())
             self.sessions[message.guild.id].addingTracks.append(trackMessage.id)
-            while self.sessions[message.guild.id].addingTracks[0] != trackMessage.id:
-                await asyncio.sleep(0.5)
-            await asyncio.sleep(2)
-            track = await Track(audioSource, self, trackMessage, srcType = SourceType.DISCORDATT)
-            await self.sessions[message.guild.id].addTrack(track)
-            asyncio.create_task(trackMessage.edit(embed = self.addedEmbed(track, message.guild.id, message.author)))
-            self.sessions[message.guild.id].addingTracks.pop(0)
+            trackMessages[att.id] = trackMessage
+        self.sessions[message.guild.id].adding = False
+
+        for att in message.attachments:
+            if att.content_type != 'audio/mpeg':
+                continue
+            audioSource = {
+                'guild': message.guild.id, 'channel': message.channel.id,
+                'message': message.id,     'attachment': att.id}
+            await self.addTrack(
+                audioSource, message.guild.id, message.author,
+                trackMessage = trackMessages[att.id],
+                srcType = SourceType.DISCORDATT)
+        await asyncio.sleep(2)
 
 
     async def voiceConnect(self, voiceChannel, rootMessage):
@@ -60,7 +81,6 @@ class MusicKampe(discord.ext.commands.Bot):
         if voiceState != None:
             self.sessions[voiceChannel.guild.id] = MusicSession(voiceState, rootMessage)
             return self.sessions[voiceChannel.guild.id]
-
         print(f'Connection to voice channel "{voiceChannel.name}" (id: {voiceChannel.id}) failed')
         return False
 
@@ -70,9 +90,8 @@ class MusicKampe(discord.ext.commands.Bot):
             await self.sessions[guildId].disconnect()
             self.sessions.pop(guildId)
             return True
-        else:
-            print(f'Disconnection failed: no connection in guild "{(await self.fetch_guild(guildId)).name}" with id {guildId} is detected')
-            return False
+        print(f'Disconnection failed: no connection in guild "{(await self.fetch_guild(guildId)).name}" with id {guildId} is detected')
+        return False
 
     
     async def startSession(self, ctx):
@@ -89,7 +108,6 @@ class MusicKampe(discord.ext.commands.Bot):
             print('Cannot start new music session')
 
         return connected
-
         
 
     async def on_message(self, message):
@@ -115,7 +133,6 @@ class MusicKampe(discord.ext.commands.Bot):
                     self.sessions[member.guild.id].moving = True
                     
 
-
     def initMusicCommands(self):
 
         @self.command()
@@ -123,28 +140,12 @@ class MusicKampe(discord.ext.commands.Bot):
             currentSession = await self.startSession(ctx)
             if (not currentSession):
                 return
-
             if musicSource.startswith('https://www.youtube.com/') or musicSource.startswith('https://youtu.be/'):
-                trackMessage = await self.sessions[ctx.guild.id].channelLog.send(embed = Track.addingFirstEmbed())
-                self.sessions[ctx.guild.id].addingTracks.append(trackMessage.id)
-                while self.sessions[ctx.guild.id].addingTracks[0] != trackMessage.id:
-                    await asyncio.sleep(0.5)
-                track = await Track(musicSource, self, trackMessage, srcType = SourceType.YOUTUBE)
-                await self.sessions[ctx.guild.id].addTrack(track)
-                await trackMessage.edit(embed = self.addedEmbed(track, ctx.guild.id, ctx.author))
-                self.sessions[ctx.guild.id].addingTracks.pop(0)
-            elif musicSource.endswith('.mp3'):
-                trackMessage = await self.sessions[ctx.guild.id].channelLog.send(embed = Track.addingFirstEmbed())
-                self.sessions[ctx.guild.id].addingTracks.append(trackMessage.id)
-                while self.sessions[ctx.guild.id].addingTracks[0] != trackMessage.id:
-                    await asyncio.sleep(0.5)
-                track = await Track(musicSource, self, trackMessage, srcType = SourceType.URL)
-                await self.sessions[ctx.guild.id].addTrack(track)
-                await trackMessage.edit(embed = self.addedEmbed(track, ctx.guild.id, ctx.author))
-                self.sessions[ctx.guild.id].addingTracks.pop(0)
+                await self.addTrack(musicSource, ctx.guild.id, ctx.author, srcType = SourceType.YOUTUBE)
+            elif musicSource.find('.mp3') != -1:
+                await self.addTrack(musicSource, ctx.guild.id, ctx.author, srcType = SourceType.URL)
             else:
                 await sendError(ctx, 'Wrong url: either direct mp3 or youtube')
-                return
             
 
         @self.command()
@@ -166,7 +167,7 @@ class MusicKampe(discord.ext.commands.Bot):
                 return await sendError(ctx, f'There\'s no opened session on this server')
             self.sessions[ctx.guild.id].nexting = True
 
-
+        
         @self.command()
         async def queue(ctx):
             if ctx.guild.id not in self.sessions:
@@ -192,7 +193,6 @@ class MusicKampe(discord.ext.commands.Bot):
         async def stop(ctx):
             if ctx.guild.id not in self.sessions:
                 return await sendWarning(ctx, f'There\'s no opened session on this server')
-
             self.sessions[ctx.guild.id].kicked = False
             await self.voiceDisconnect(ctx.guild.id)
             await sendSuccess(ctx, "The music session for this guild has been closed")

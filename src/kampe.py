@@ -1,7 +1,6 @@
-from .music import *
 import datetime
-import json
-import yt_dlp
+
+from .music import MusicKampe
 
 class Kampe(MusicKampe):
     def __init__(self, *args, **kargs):

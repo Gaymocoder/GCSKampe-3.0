@@ -2,11 +2,13 @@ from .extras import sendMessage
 
 import discord
 import asyncio
+import random
 
 class MusicSession:
     def __obliviate(self):
         self.queue = []
         self.loading = []
+        self.adding = False
         self.addingTracks = []
         self.rootMessage = None
         self._queuePosition = 0
