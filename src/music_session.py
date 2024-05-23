@@ -14,6 +14,8 @@ class MusicSession:
         self._queuePosition = 0
         self.playing = False
 
+        self.shuffleRepeat = False
+
 
     def __init__(self, voiceClient, rootMessage):
         self.__obliviate()
@@ -68,6 +70,7 @@ class MusicSession:
 
     async def disconnect(self):
         if self.is_connected():
+            shuffleRepeat = False
             if self.voiceState.source != None:
                 self.voiceState.source.cleanup()
             await self.voiceState.disconnect()
@@ -129,3 +132,12 @@ class MusicSession:
             self.playing = False
             if (self.is_connected()):
                 await sendMessage(self.channelLog, "I've reached the end of the queue")
+
+            if (self.shuffleRepeat):
+                random.shuffle(self.queue)
+                self._queuePosition = 0
+                await sendMessage(self.channelLog, "Queue has been shuffled and relaunched")
+                await self.playTracks()
+
+                
+            

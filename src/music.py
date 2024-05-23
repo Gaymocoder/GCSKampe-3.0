@@ -167,7 +167,14 @@ class MusicKampe(discord.ext.commands.Bot):
                 return await sendError(ctx, f'There\'s no opened session on this server')
             self.sessions[ctx.guild.id].nexting = True
 
-        
+        @self.command()
+        async def shuffle_repeat(ctx):
+            if ctx.guild.id not in self.sessions:
+                return await sendError(ctx, f'There\'s no opened session on this server')
+            self.sessions[ctx.guild.id].shuffleRepeat = True
+            await sendSuccess(ctx, "The queue will be shuffled and relaunched every time it ends")
+
+
         @self.command()
         async def queue(ctx):
             if ctx.guild.id not in self.sessions:
