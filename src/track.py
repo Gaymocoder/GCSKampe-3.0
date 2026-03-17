@@ -1,6 +1,7 @@
 from .audio_data import AudioData
 from .extras import SourceType, FFMPEG_OPTIONS
 
+import os
 import discord
 from discord import FFmpegOpusAudio
 
@@ -59,4 +60,4 @@ class Track(AudioData):
 
 
     def audio(self):
-        return FFmpegOpusAudio(self.audioURL, **FFMPEG_OPTIONS, executable = "ffmpeg.exe")
+        return FFmpegOpusAudio(self.audioURL, **FFMPEG_OPTIONS, executable = "ffmpeg" + (".exe" if os.name == 'nt' else ""))

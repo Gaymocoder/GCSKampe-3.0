@@ -1,0 +1,5 @@
+discord
+pyshorteners
+yt_dlp
+mutagen
+discord.py[voice]

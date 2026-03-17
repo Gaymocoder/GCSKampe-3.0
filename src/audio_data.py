@@ -24,6 +24,8 @@ class AudioData:
     def __getYoutubeData(self):
         ydlOptions = {
             'format': 'bestaudio/best',
+            'verbose': True,
+            'remote-components': 'ejs:github',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'm4a',
